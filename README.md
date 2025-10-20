@@ -8,25 +8,19 @@ This is a fork of [tsl0922/ttyd](https://github.com/tsl0922/ttyd) with modificat
 
 ### Session Parameter Extraction
 
-The frontend HTML now extracts a `session` query parameter from the URL and uses it to construct the WebSocket connection path.
+The frontend HTML now optionally extracts a `session` query parameter from the URL for dynamic WebSocket routing.
 
-**Usage:**
-```
-http://localhost:7681/?session=my-session-id
-```
+**Backward Compatible:**
+- **Without parameter:** `http://localhost:7681/` → connects to `ws://localhost:7681/ws` (original ttyd behavior)
+- **With parameter:** `http://localhost:7681/?session=my-session-id` → connects to `ws://localhost:7681/terminal/ws/my-session-id`
 
-This will cause the WebSocket to connect to:
-```
-ws://localhost:7681/terminal/ws/my-session-id
-```
-
-**Use case:** Enables multiple ttyd instances to be multiplexed behind a single frontend, with routing based on session ID.
+**Use case:** Enables multiple ttyd instances to be multiplexed behind a single frontend, with routing based on session ID, while maintaining full compatibility with vanilla ttyd usage.
 
 **Implementation:**
 - Modified: `html/src/components/app.tsx`
-- Extracts `session` from `URLSearchParams`
-- Falls back to `test-session-9999` if no parameter provided
-- WebSocket URL: `/terminal/ws/{session}` (instead of hardcoded `/ws`)
+- Conditionally uses custom path only when `session` parameter is present
+- Falls back to original `/ws` path when no parameter provided
+- WebSocket URL: `/terminal/ws/{session}` when parameterized, `/ws` otherwise
 
 ### TypeScript Strict Mode Fix
 
