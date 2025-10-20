@@ -1,3 +1,68 @@
+# ttyd Fork - Session Parameter Support
+
+This is a fork of [tsl0922/ttyd](https://github.com/tsl0922/ttyd) with modifications to support dynamic session routing via URL query parameters.
+
+**Upstream:** https://github.com/tsl0922/ttyd
+
+## Modifications
+
+### Session Parameter Extraction
+
+The frontend HTML now extracts a `session` query parameter from the URL and uses it to construct the WebSocket connection path.
+
+**Usage:**
+```
+http://localhost:7681/?session=my-session-id
+```
+
+This will cause the WebSocket to connect to:
+```
+ws://localhost:7681/terminal/ws/my-session-id
+```
+
+**Use case:** Enables multiple ttyd instances to be multiplexed behind a single frontend, with routing based on session ID.
+
+**Implementation:**
+- Modified: `html/src/components/app.tsx`
+- Extracts `session` from `URLSearchParams`
+- Falls back to `test-session-9999` if no parameter provided
+- WebSocket URL: `/terminal/ws/{session}` (instead of hardcoded `/ws`)
+
+### TypeScript Strict Mode Fix
+
+Fixed TypeScript compilation error in ref callback to satisfy strict type checking.
+
+**Implementation:**
+- Modified: `html/src/components/terminal/index.tsx`
+- Changed ref callback from arrow expression to block statement
+
+## Building
+
+Build the frontend HTML:
+
+```bash
+cd html
+npm install
+npm run build
+```
+
+Output: `html/dist/inline.html` (single-file HTML with inlined JS/CSS)
+
+## Branch
+
+Changes are on branch: `idio-session-params`
+
+## Upstream Sync
+
+To pull updates from upstream:
+
+```bash
+git fetch upstream
+git merge upstream/main
+```
+
+---
+
 ![backend](https://github.com/tsl0922/ttyd/workflows/backend/badge.svg)
 ![frontend](https://github.com/tsl0922/ttyd/workflows/frontend/badge.svg)
 [![GitHub Releases](https://img.shields.io/github/downloads/tsl0922/ttyd/total)](https://github.com/tsl0922/ttyd/releases)
