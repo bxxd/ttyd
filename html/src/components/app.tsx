@@ -7,7 +7,10 @@ import type { ClientOptions, FlowControl } from './terminal/xterm';
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const path = window.location.pathname.replace(/[/]+$/, '');
-const wsUrl = [protocol, '//', window.location.host, path, '/ws', window.location.search].join('');
+// Extract session ID from query parameter
+const urlParams = new URLSearchParams(window.location.search);
+const sessionId = urlParams.get('session') || 'test-session-9999';
+const wsUrl = [protocol, '//', window.location.host, '/terminal/ws/', sessionId].join('');
 const tokenUrl = [window.location.protocol, '//', window.location.host, path, '/token'].join('');
 const clientOptions = {
     rendererType: 'webgl',
