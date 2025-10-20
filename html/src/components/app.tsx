@@ -7,10 +7,13 @@ import type { ClientOptions, FlowControl } from './terminal/xterm';
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const path = window.location.pathname.replace(/[/]+$/, '');
-// Extract session ID from query parameter
+// Extract session ID from query parameter (optional)
 const urlParams = new URLSearchParams(window.location.search);
-const sessionId = urlParams.get('session') || 'test-session-9999';
-const wsUrl = [protocol, '//', window.location.host, '/terminal/ws/', sessionId].join('');
+const sessionId = urlParams.get('session');
+// If session parameter provided, use custom WebSocket path; otherwise use default ttyd path
+const wsUrl = sessionId
+    ? [protocol, '//', window.location.host, '/terminal/ws/', sessionId].join('')
+    : [protocol, '//', window.location.host, path, '/ws', window.location.search].join('');
 const tokenUrl = [window.location.protocol, '//', window.location.host, path, '/token'].join('');
 const clientOptions = {
     rendererType: 'webgl',
