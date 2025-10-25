@@ -26,6 +26,13 @@ export class Terminal extends Component<Props, State> {
         await this.xterm.refreshToken();
         this.xterm.open(this.container);
         this.xterm.connect();
+
+        // Listen for scroll-to-bottom messages from parent frame
+        window.addEventListener('message', (e) => {
+            if (e.data && e.data.action === 'scrollToBottom' && (window as any).term) {
+                (window as any).term.scrollToBottom();
+            }
+        });
     }
 
     componentWillUnmount() {
