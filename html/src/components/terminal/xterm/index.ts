@@ -313,6 +313,8 @@ export class Xterm {
         const queryObj = Array.from(new URLSearchParams(query) as unknown as Iterable<[string, string]>);
 
         for (const [k, queryVal] of queryObj) {
+            // Skip our custom parameters (not xterm options)
+            if (k === 'session' || k === 'token') continue;
             let v = clientOptions[k];
             if (v === undefined) v = terminal.options[k];
             switch (typeof v) {
