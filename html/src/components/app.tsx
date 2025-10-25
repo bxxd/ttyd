@@ -6,13 +6,14 @@ import type { ITerminalOptions, ITheme } from '@xterm/xterm';
 import type { ClientOptions, FlowControl } from './terminal/xterm';
 
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-const path = window.location.pathname.replace(/[/]+$/, '');
-// Extract session ID from query parameter (optional)
+const path = window.location.pathname.replace(/[/]+$/, '').replace('/ttyd.html', '');
+// Extract session ID and token from query parameters (optional)
 const urlParams = new URLSearchParams(window.location.search);
 const sessionId = urlParams.get('session');
-// If session parameter provided, use custom WebSocket path; otherwise use default ttyd path
+const token = urlParams.get('token');
+// If session parameter provided, use custom WebSocket path with token; otherwise use default ttyd path
 const wsUrl = sessionId
-    ? [protocol, '//', window.location.host, '/terminal/ws/', sessionId].join('')
+    ? [protocol, '//', window.location.host, '/terminal/ws/', sessionId, token ? `?token=${token}` : ''].join('')
     : [protocol, '//', window.location.host, path, '/ws', window.location.search].join('');
 const tokenUrl = [window.location.protocol, '//', window.location.host, path, '/token'].join('');
 const clientOptions = {
