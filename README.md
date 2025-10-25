@@ -1,34 +1,66 @@
-# ttyd Fork - Session Parameter Support
+# ttyd Fork - Session Routing + Authentication
 
-This is a fork of [tsl0922/ttyd](https://github.com/tsl0922/ttyd) with modifications to support dynamic session routing via URL query parameters.
+This is a fork of [tsl0922/ttyd](https://github.com/tsl0922/ttyd) with modifications for multi-tenant terminal deployment.
 
-**Upstream:** https://github.com/tsl0922/ttyd
+**Upstream:** https://github.com/tsl0922/ttyd (active maintenance, latest release March 2024)
+
+**Default branch:** `idio-main` (production)
+
+## Why Fork
+
+**Requirements not in upstream:**
+1. **Session-based routing** - Multiple ttyd instances behind single frontend, dynamic WebSocket routing
+2. **Token authentication** - URL-based token passing for secure access
+3. **Parent frame control** - postMessage API for UI integration
+
+**Note:** Upstream ttyd is designed for single-instance use. These modifications enable multi-instance deployments with session isolation.
 
 ## Modifications
 
-### Session Parameter Extraction
+### 1. Session Parameter Routing (`?session=<id>`)
 
-The frontend HTML now optionally extracts a `session` query parameter from the URL for dynamic WebSocket routing.
+Dynamic WebSocket routing based on URL query parameter.
 
 **Backward Compatible:**
-- **Without parameter:** `http://localhost:7681/` → connects to `ws://localhost:7681/ws` (original ttyd behavior)
-- **With parameter:** `http://localhost:7681/?session=my-session-id` → connects to `ws://localhost:7681/terminal/ws/my-session-id`
+- **Without parameter:** `/ttyd.html` → connects to `ws://host/ws` (original ttyd behavior)
+- **With parameter:** `/ttyd.html?session=abc` → connects to `ws://host/terminal/ws/abc` (custom routing)
 
-**Use case:** Enables multiple ttyd instances to be multiplexed behind a single frontend, with routing based on session ID, while maintaining full compatibility with vanilla ttyd usage.
+**Use case:** Backend proxy routes `/terminal/ws/{session}` to appropriate ttyd instance based on session ID.
 
 **Implementation:**
 - Modified: `html/src/components/app.tsx`
-- Conditionally uses custom path only when `session` parameter is present
-- Falls back to original `/ws` path when no parameter provided
-- WebSocket URL: `/terminal/ws/{session}` when parameterized, `/ws` otherwise
+- Extracts `session` from URL query parameters
+- Conditionally builds WebSocket URL: `/terminal/ws/{session}` or `/ws`
 
-### TypeScript Strict Mode Fix
+### 2. Token Parameter Authentication (`?token=<jwt>`)
 
-Fixed TypeScript compilation error in ref callback to satisfy strict type checking.
+JWT authentication for multi-user isolation.
+
+**How it works:**
+- Frontend: `/ttyd.html?session=abc&token=xyz`
+- WebSocket: `ws://host/terminal/ws/abc?token=xyz`
+- Backend validates token, checks session ownership, proxies to ttyd
+
+**Implementation:**
+- Modified: `html/src/components/app.tsx`
+- Extracts `token` from URL query parameters
+- Appends to WebSocket URL when session parameter present
+
+### 3. postMessage API - Scroll Control
+
+Parent frame can control terminal view via postMessage.
+
+**Commands:**
+- `{action: 'scrollToBottom'}` - Scrolls terminal to bottom of output
+
+**Use case:** Jump-to-bottom button in parent UI.
 
 **Implementation:**
 - Modified: `html/src/components/terminal/index.tsx`
-- Changed ref callback from arrow expression to block statement
+- Added `window.addEventListener('message')` in componentDidMount
+- Calls `window.term.scrollToBottom()` on matching message
+
+**Note:** Upstream has open PRs (#1468, #1469) for postMessage API with different use cases (command execution, connection events). Our implementation is view control only.
 
 ## Building
 
@@ -37,23 +69,43 @@ Build the frontend HTML:
 ```bash
 cd html
 npm install
-npm run build
+npm run inline    # Note: Uses gulp, not webpack (creates dist/inline.html)
 ```
 
 Output: `html/dist/inline.html` (single-file HTML with inlined JS/CSS)
 
-## Branch
+**Deploy:**
+```bash
+cp dist/inline.html /path/to/your/static/ttyd.html
+```
 
-Changes are on branch: `idio-session-params`
+## Branch Strategy
+
+- **`main`** - Tracks upstream/main (for pulling updates)
+- **`idio-main`** - Production branch (deploy from here) - 7 custom commits
+- **`idio-session-params`** - Historical feature branch (can delete)
 
 ## Upstream Sync
 
-To pull updates from upstream:
+Pull updates from upstream and rebase our changes:
 
 ```bash
-git fetch upstream
-git merge upstream/main
+git checkout main
+git pull upstream main
+git push origin main
+
+git checkout idio-main
+git rebase main    # Reapply our 7 commits on top of latest upstream
+git push origin idio-main --force-with-lease
 ```
+
+## Contributing Upstream
+
+**Session routing:** Too specific to our architecture (not suitable for upstream)
+
+**postMessage scroll control:** Could contribute if upstream's postMessage PRs (#1468, #1469) get merged and establish API pattern. Would be natural extension (command execution + events + view control).
+
+For now, keeping as fork makes sense given our specific multi-tenant requirements.
 
 ---
 
