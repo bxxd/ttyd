@@ -27,10 +27,18 @@ export class Terminal extends Component<Props, State> {
         this.xterm.open(this.container);
         this.xterm.connect();
 
-        // Listen for scroll-to-bottom messages from parent frame
+        // Listen for messages from parent frame
         window.addEventListener('message', (e) => {
-            if (e.data && e.data.action === 'scrollToBottom' && (window as any).term) {
+            if (!e.data) return;
+
+            // Scroll to bottom
+            if (e.data.action === 'scrollToBottom' && (window as any).term) {
                 (window as any).term.scrollToBottom();
+            }
+
+            // Send input to terminal (for drag-and-drop file paths)
+            if (e.data.action === 'sendInput' && e.data.text && this.xterm) {
+                this.xterm.sendData(e.data.text);
             }
         });
     }
