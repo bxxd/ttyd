@@ -66,6 +66,9 @@ export class Terminal extends Component<Props, State> {
 
     componentWillUnmount() {
         this.xterm.dispose();
+        if (isMobile() && this.container) {
+            this.container.removeEventListener('click', this.showMobileInput);
+        }
     }
 
     render({ id }: Props, { modal, mobileInputVisible }: State) {
@@ -126,15 +129,16 @@ export class Terminal extends Component<Props, State> {
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT') return;
         if (target === this.mobileInput) {
+            // Already focused, just ensure state is synced
             this.setState({ mobileInputVisible: true });
             return;
         }
 
         this.setState({ mobileInputVisible: true });
-        setTimeout(() => {
+        requestAnimationFrame(() => {
             this.clearMobileInput();
             this.mobileInput?.focus();
-        }, 10);
+        });
     }
 
     @bind
