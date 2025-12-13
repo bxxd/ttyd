@@ -273,6 +273,8 @@ export class Xterm {
             terminal.reset();
             terminal.options.disableStdin = false;
             overlayAddon.showOverlay('Reconnected', 300);
+            // Trigger resize to make ttyd redraw screen content
+            setTimeout(() => this.fitAddon.fit(), 100);
         } else {
             this.opened = true;
         }

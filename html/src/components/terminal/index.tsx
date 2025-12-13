@@ -178,6 +178,8 @@ export class Terminal extends Component<Props, State> {
         const text = e.clipboardData?.getData('text');
         if (text) {
             this.xterm.sendData(text);
+            // Sync state so next input diff is correct
+            this.clearMobileInput();
         }
     }
 }
