@@ -1,0 +1,67 @@
+/* Mobile Input Overlay - Gboard voice input style */
+
+.mobile-input-overlay {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    pointer-events: none;
+}
+
+/* Invisible textarea that captures keyboard input */
+/* Using transparent colors instead of opacity:0 so context menu works */
+.mobile-input-capture {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 44px;
+    pointer-events: none; /* Don't capture clicks when inactive */
+    font-size: 16px; /* Prevents iOS zoom on focus */
+    -webkit-appearance: none;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: transparent;
+    caret-color: transparent;
+    -webkit-text-fill-color: transparent;
+}
+
+/* Only capture pointer events when active (keyboard showing) */
+.mobile-input-capture.active {
+    pointer-events: auto;
+}
+
+/* Floating preview bar - white text on dark background like Gboard voice input */
+.mobile-input-preview {
+    position: fixed;
+    bottom: 60px; /* Above keyboard (typical mobile keyboard height ~250-300px, but browser handles that) */
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100% - 32px);
+    padding: 12px 20px;
+    background: rgba(0, 0, 0, 0.9);
+    color: #ffffff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.4;
+    border-radius: 24px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    pointer-events: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}

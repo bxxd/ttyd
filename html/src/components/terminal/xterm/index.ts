@@ -117,6 +117,11 @@ export class Xterm {
     }
 
     @bind
+    public isConnected(): boolean {
+        return this.socket?.readyState === WebSocket.OPEN;
+    }
+
+    @bind
     private register<T extends IDisposable>(d: T): T {
         this.disposables.push(d);
         return d;
