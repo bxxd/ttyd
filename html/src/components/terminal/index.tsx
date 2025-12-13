@@ -13,7 +13,6 @@ interface Props extends XtermOptions {
 interface State {
     modal: boolean;
     mobileInputVisible: boolean;
-    mobileInputBuffer: string;
 }
 
 // Detect mobile (touch device with small screen)
@@ -36,7 +35,6 @@ export class Terminal extends Component<Props, State> {
         this.state = {
             modal: false,
             mobileInputVisible: false,
-            mobileInputBuffer: '',
         };
     }
 
@@ -112,6 +110,13 @@ export class Terminal extends Component<Props, State> {
 
     // ==================== Mobile Input Methods ====================
 
+    private clearMobileInput() {
+        if (this.mobileInput) {
+            this.mobileInput.value = '';
+        }
+        this.lastInputValue = '';
+    }
+
     @bind
     showMobileInput(e: Event) {
         // Don't activate mobile input if not connected (let xterm handle reconnect)
@@ -127,11 +132,8 @@ export class Terminal extends Component<Props, State> {
 
         this.setState({ mobileInputVisible: true });
         setTimeout(() => {
-            if (this.mobileInput) {
-                this.mobileInput.value = '';
-                this.lastInputValue = '';
-                this.mobileInput.focus();
-            }
+            this.clearMobileInput();
+            this.mobileInput?.focus();
         }, 10);
     }
 
@@ -166,11 +168,7 @@ export class Terminal extends Component<Props, State> {
         if (e.key === 'Enter') {
             e.preventDefault();
             this.xterm.sendData('\r');
-            // Clear textarea after enter
-            if (this.mobileInput) {
-                this.mobileInput.value = '';
-                this.lastInputValue = '';
-            }
+            this.clearMobileInput();
         }
     }
 
