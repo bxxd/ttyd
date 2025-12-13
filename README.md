@@ -62,6 +62,30 @@ Parent frame can control terminal view via postMessage.
 
 **Note:** Upstream has open PRs (#1468, #1469) for postMessage API with different use cases (command execution, connection events). Our implementation is view control only.
 
+### 4. Mobile Input Overlay (Branch: `mobile-input-overlay`)
+
+Fixes mobile keyboard input issues caused by xterm.js's hidden textarea architecture.
+
+**Problem:** xterm.js uses a hidden textarea that repositions during IME composition, causing mobile keyboards to lose track of the input element. Results in missed/duplicate characters.
+
+**Solution:** Invisible textarea overlay with stable position that captures mobile input and sends directly to ttyd, bypassing xterm.js's problematic IME handling.
+
+**Behavior:**
+- Detects mobile (touch + screen width ≤768px)
+- Tap terminal → focus overlay → keyboard appears
+- Characters sent immediately via diff detection
+- Handles Enter, backspace, paste events
+- Only activates when WebSocket connected (preserves "Press Enter to reconnect")
+
+**Trade-offs:**
+- Slight input delay (~10-20ms) vs xterm's broken IME
+- Long-press paste context menu doesn't work (voice input workaround)
+
+**Implementation:**
+- `html/src/components/terminal/index.tsx` - Mobile input component
+- `html/src/components/terminal/mobile-input.css` - Overlay styles
+- `html/src/components/terminal/xterm/index.ts` - Added `isConnected()` method
+
 ## Building
 
 Build the frontend HTML:
@@ -82,8 +106,8 @@ cp dist/inline.html /path/to/your/static/ttyd.html
 ## Branch Strategy
 
 - **`main`** - Tracks upstream/main (for pulling updates)
-- **`idio-main`** - Production branch (deploy from here) - 7 custom commits
-- **`idio-session-params`** - Historical feature branch (can delete)
+- **`idio-main`** - Production branch (deploy from here)
+- **`mobile-input-overlay`** - Mobile input fix (pending merge to idio-main)
 
 ## Upstream Sync
 
