@@ -152,6 +152,8 @@ export class Terminal extends Component<Props, State> {
         const lastValue = this.lastInputValue;
 
         // Send only the new characters (diff)
+        // NOTE: This assumes edits happen at end of text. Mid-text cursor edits
+        // will send wrong chars. Acceptable for mobile where sequential typing is typical.
         if (currentValue.length > lastValue.length) {
             // Characters added
             const newChars = currentValue.slice(lastValue.length);
@@ -173,6 +175,15 @@ export class Terminal extends Component<Props, State> {
             e.preventDefault();
             this.xterm.sendData('\r');
             this.clearMobileInput();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            this.xterm.sendData('\x1b');
+        } else if (e.ctrlKey && e.key === 'c') {
+            e.preventDefault();
+            this.xterm.sendData('\x03'); // SIGINT
+        } else if (e.ctrlKey && e.key === 'd') {
+            e.preventDefault();
+            this.xterm.sendData('\x04'); // EOF
         }
     }
 
