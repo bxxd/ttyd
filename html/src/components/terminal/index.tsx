@@ -92,7 +92,7 @@ export class Terminal extends Component<Props, State> {
                         autocomplete="off"
                         autocorrect="off"
                         autocapitalize="off"
-                        spellcheck={false}
+                        spellcheck="false"
                     />
                 )}
             </div>
