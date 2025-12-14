@@ -1,0 +1,25 @@
+/* Mobile Input - invisible textarea with stable position for IME handling
+   Note: long-press context menu doesn't work (pointer-events:none when inactive) */
+
+.mobile-input-capture {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 44px;
+    pointer-events: none;
+    font-size: 16px; /* Prevents iOS zoom on focus */
+    -webkit-appearance: none;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: transparent;
+    caret-color: transparent;
+    -webkit-text-fill-color: transparent;
+    z-index: 9999;
+}
+
+.mobile-input-capture.active {
+    pointer-events: auto;
+}

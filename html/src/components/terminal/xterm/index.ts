@@ -101,19 +101,28 @@ export class Xterm {
     private reconnect = true;
     private doReconnect = true;
     private closeOnDisconnect = false;
+    private reconnectAttempt = 0;
 
     private writeFunc = (data: ArrayBuffer) => this.writeData(new Uint8Array(data));
 
     constructor(
         private options: XtermOptions,
         private sendCb: () => void
-    ) {}
+    ) {
+        // Expose for debugging: window.ttydSocket.close() to test reconnect
+        (window as any).ttydSocket = null;
+    }
 
     dispose() {
         for (const d of this.disposables) {
             d.dispose();
         }
         this.disposables.length = 0;
+    }
+
+    @bind
+    public isConnected(): boolean {
+        return this.socket?.readyState === WebSocket.OPEN;
     }
 
     @bind
@@ -128,15 +137,18 @@ export class Xterm {
     }
 
     @bind
-    public async refreshToken() {
+    public async refreshToken(): Promise<boolean> {
         try {
             const resp = await fetch(this.options.tokenUrl);
             if (resp.ok) {
                 const json = await resp.json();
                 this.token = json.token;
+                return true;
             }
+            return false;
         } catch (e) {
             console.error(`[ttyd] fetch ${this.options.tokenUrl}: `, e);
+            return false; // Network error
         }
     }
 
@@ -199,7 +211,24 @@ export class Xterm {
                 this.overlayAddon?.showOverlay('\u2702', 200);
             })
         );
-        register(addEventListener(window, 'resize', () => fitAddon.fit()));
+        let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+        register(addEventListener(window, 'resize', () => {
+            // Save scroll position before resize
+            const viewportY = terminal.buffer.active.viewportY;
+            const baseY = terminal.buffer.active.baseY;
+            const wasAtBottom = viewportY >= baseY;
+
+            fitAddon.fit();
+
+            // After Ink redraws, restore scroll position or stay at bottom
+            if (resizeDebounce) clearTimeout(resizeDebounce);
+            resizeDebounce = setTimeout(() => {
+                if (wasAtBottom) {
+                    terminal.scrollToBottom();
+                }
+                // If not at bottom, xterm preserves relative position automatically
+            }, 400); // Wait for Ink redraw
+        }));
         register(addEventListener(window, 'beforeunload', this.onWindowUnload));
     }
 
@@ -247,6 +276,7 @@ export class Xterm {
     @bind
     public connect() {
         this.socket = new WebSocket(this.options.wsUrl, ['tty']);
+        (window as any).ttydSocket = this.socket; // Debug: window.ttydSocket.close()
         const { socket, register } = this;
 
         socket.binaryType = 'arraybuffer';
@@ -259,18 +289,36 @@ export class Xterm {
     @bind
     private onSocketOpen() {
         console.log('[ttyd] websocket connection opened');
+        this.reconnectAttempt = 0; // Reset on successful connect
 
         const { textEncoder, terminal, overlayAddon } = this;
         const msg = JSON.stringify({ AuthToken: this.token, columns: terminal.cols, rows: terminal.rows });
         this.socket?.send(textEncoder.encode(msg));
 
-        if (this.opened) {
-            terminal.reset();
+        const isReconnect = this.opened;
+        if (isReconnect) {
+            // Don't call terminal.reset() - it breaks Ink/ANSI apps like Claude Code
+            // that depend on cursor position state for in-place updates
             terminal.options.disableStdin = false;
             overlayAddon.showOverlay('Reconnected', 300);
-        } else {
-            this.opened = true;
         }
+        this.opened = true;
+
+        // Resize after connect/reconnect
+        setTimeout(() => {
+            this.fitAddon.fit();
+
+            // On reconnect, force send resize to trigger SIGWINCH in PTY
+            // This makes Ink/Claude Code redraw properly
+            if (isReconnect && this.socket?.readyState === WebSocket.OPEN) {
+                const { cols, rows } = terminal;
+                const msg = JSON.stringify({ columns: cols, rows: rows });
+                this.socket.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
+            }
+
+            // Scroll to bottom after re-render completes
+            setTimeout(() => terminal.scrollToBottom(), 300);
+        }, 100);
 
         this.doReconnect = this.reconnect;
         this.initListeners();
@@ -281,28 +329,110 @@ export class Xterm {
     private onSocketClose(event: CloseEvent) {
         console.log(`[ttyd] websocket connection closed with code: ${event.code}`);
 
-        const { refreshToken, connect, doReconnect, overlayAddon } = this;
+        const { overlayAddon } = this;
         overlayAddon.showOverlay('Connection Closed');
         this.dispose();
 
-        // 1000: CLOSE_NORMAL
-        if (event.code !== 1000 && doReconnect) {
-            overlayAddon.showOverlay('Reconnecting...');
-            refreshToken().then(connect);
-        } else if (this.closeOnDisconnect) {
+        if (this.closeOnDisconnect) {
             window.close();
-        } else {
-            const { terminal } = this;
-            const keyDispose = terminal.onKey(e => {
-                const event = e.domEvent;
-                if (event.key === 'Enter') {
-                    keyDispose.dispose();
-                    overlayAddon.showOverlay('Reconnecting...');
-                    refreshToken().then(connect);
-                }
-            });
-            overlayAddon.showOverlay('Press ⏎ to Reconnect');
+            return;
         }
+
+        // Start reconnection process
+        this.attemptReconnect();
+    }
+
+    private attemptReconnect() {
+        const { refreshToken, connect, overlayAddon } = this;
+
+        // If page is hidden (backgrounded/phone asleep), wait until visible
+        if (document.hidden) {
+            console.log('[ttyd] page hidden, waiting for visibility...');
+            overlayAddon.showOverlay('Waiting...');
+            const onVisible = () => {
+                if (!document.hidden) {
+                    document.removeEventListener('visibilitychange', onVisible);
+                    console.log('[ttyd] page visible, checking connection...');
+                    this.reconnectAttempt = 0; // Reset counter - fresh start
+                    this.attemptReconnect();
+                }
+            };
+            document.addEventListener('visibilitychange', onVisible);
+            return;
+        }
+
+        // If offline, wait for network
+        if (!navigator.onLine) {
+            console.log('[ttyd] offline, waiting for network...');
+            overlayAddon.showOverlay('Waiting for network...');
+            const onOnline = () => {
+                window.removeEventListener('online', onOnline);
+                console.log('[ttyd] network restored, reconnecting...');
+                this.reconnectAttempt = 0; // Reset counter
+                this.attemptReconnect();
+            };
+            window.addEventListener('online', onOnline);
+            return;
+        }
+
+        // Auto-reconnect with exponential backoff
+        this.reconnectAttempt++;
+
+        // After 3 failed attempts, ask parent to reconnect terminal
+        if (this.reconnectAttempt > 3) {
+            console.log('[ttyd] too many failed reconnects, requesting panel reconnect');
+            overlayAddon.showOverlay('Reconnecting...');
+            // Ask parent to recreate terminal session
+            if (window.parent !== window) {
+                window.parent.postMessage({ type: 'ttyd_reconnect' }, '*');
+            } else {
+                window.location.reload();
+            }
+            return;
+        }
+
+        // First attempt: try immediately. Subsequent attempts: exponential backoff
+        const delay = this.reconnectAttempt === 1 ? 0 : Math.min(1000 * Math.pow(2, this.reconnectAttempt - 2), 30000);
+        const delaySecs = Math.round(delay / 1000);
+
+        if (delay === 0) {
+            console.log('[ttyd] reconnecting...');
+            overlayAddon.showOverlay('Reconnecting...');
+        } else {
+            console.log(`[ttyd] reconnect attempt ${this.reconnectAttempt} in ${delaySecs}s`);
+            overlayAddon.showOverlay(`Reconnecting in ${delaySecs}s...`);
+        }
+
+        setTimeout(async () => {
+            // Re-check visibility before actually trying
+            if (document.hidden) {
+                this.attemptReconnect(); // Will wait for visibility
+                return;
+            }
+            overlayAddon.showOverlay('Reconnecting...');
+            this.doReconnect = true;
+
+            // Try to refresh token - if it fails (network error), wait for online
+            const tokenOk = await refreshToken();
+            if (!tokenOk) {
+                console.log('[ttyd] network error, waiting for connectivity...');
+                this.reconnectAttempt--; // Don't count network failures
+                overlayAddon.showOverlay('Waiting for network...');
+                const onOnline = () => {
+                    window.removeEventListener('online', onOnline);
+                    console.log('[ttyd] online event, retrying...');
+                    this.attemptReconnect();
+                };
+                window.addEventListener('online', onOnline);
+                // Also retry after a delay in case online event doesn't fire
+                setTimeout(() => {
+                    window.removeEventListener('online', onOnline);
+                    this.attemptReconnect();
+                }, 10000);
+                return;
+            }
+            connect();
+        }, delay);
     }
 
     @bind
