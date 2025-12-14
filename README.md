@@ -62,7 +62,7 @@ Parent frame can control terminal view via postMessage.
 
 **Note:** Upstream has open PRs (#1468, #1469) for postMessage API with different use cases (command execution, connection events). Our implementation is view control only.
 
-### 4. Mobile Input Overlay (Branch: `mobile-input-overlay`)
+### 4. Mobile Input Overlay
 
 Fixes mobile keyboard input issues caused by xterm.js's hidden textarea architecture.
 
@@ -74,8 +74,10 @@ Fixes mobile keyboard input issues caused by xterm.js's hidden textarea architec
 - Detects mobile (touch + screen width ≤768px)
 - Tap terminal → focus overlay → keyboard appears
 - Characters sent immediately via diff detection
-- Handles Enter, backspace, paste events
-- Only activates when WebSocket connected (preserves "Press Enter to reconnect")
+- Handles Enter, Escape, Ctrl+C, Ctrl+D, backspace, paste events
+- Only activates when WebSocket connected (preserves reconnect flow)
+- Cursor wake: sends zero-width space + backspace to trigger cursor display
+- Cross-session delete: backspace works even after refocus (deletes content from previous typing sessions)
 
 **Trade-offs:**
 - Slight input delay (~10-20ms) vs xterm's broken IME
@@ -85,6 +87,15 @@ Fixes mobile keyboard input issues caused by xterm.js's hidden textarea architec
 - `html/src/components/terminal/index.tsx` - Mobile input component
 - `html/src/components/terminal/mobile-input.css` - Overlay styles
 - `html/src/components/terminal/xterm/index.ts` - Added `isConnected()` method
+
+### 5. Reconnect Improvements
+
+Enhanced reconnect behavior for mobile use (phone sleep, network changes).
+
+**Features:**
+- Page Visibility API: waits when page is hidden, reconnects when visible
+- Immediate first retry, then exponential backoff (1s, 2s...)
+- Parent frame notification via postMessage for coordinated reconnect
 
 ## Building
 
@@ -106,8 +117,7 @@ cp dist/inline.html /path/to/your/static/ttyd.html
 ## Branch Strategy
 
 - **`main`** - Tracks upstream/main (for pulling updates)
-- **`idio-main`** - Production branch (deploy from here)
-- **`mobile-input-overlay`** - Mobile input fix (pending merge to idio-main)
+- **`idio-main`** - Production branch (deploy from here, includes all modifications)
 
 ## Upstream Sync
 
