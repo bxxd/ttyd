@@ -137,15 +137,18 @@ export class Xterm {
     }
 
     @bind
-    public async refreshToken() {
+    public async refreshToken(): Promise<boolean> {
         try {
             const resp = await fetch(this.options.tokenUrl);
             if (resp.ok) {
                 const json = await resp.json();
                 this.token = json.token;
+                return true;
             }
+            return false;
         } catch (e) {
             console.error(`[ttyd] fetch ${this.options.tokenUrl}: `, e);
+            return false; // Network error
         }
     }
 
@@ -326,12 +329,49 @@ export class Xterm {
     private onSocketClose(event: CloseEvent) {
         console.log(`[ttyd] websocket connection closed with code: ${event.code}`);
 
-        const { refreshToken, connect, overlayAddon } = this;
+        const { overlayAddon } = this;
         overlayAddon.showOverlay('Connection Closed');
         this.dispose();
 
         if (this.closeOnDisconnect) {
             window.close();
+            return;
+        }
+
+        // Start reconnection process
+        this.attemptReconnect();
+    }
+
+    private attemptReconnect() {
+        const { refreshToken, connect, overlayAddon } = this;
+
+        // If page is hidden (backgrounded/phone asleep), wait until visible
+        if (document.hidden) {
+            console.log('[ttyd] page hidden, waiting for visibility...');
+            overlayAddon.showOverlay('Waiting...');
+            const onVisible = () => {
+                if (!document.hidden) {
+                    document.removeEventListener('visibilitychange', onVisible);
+                    console.log('[ttyd] page visible, checking connection...');
+                    this.reconnectAttempt = 0; // Reset counter - fresh start
+                    this.attemptReconnect();
+                }
+            };
+            document.addEventListener('visibilitychange', onVisible);
+            return;
+        }
+
+        // If offline, wait for network
+        if (!navigator.onLine) {
+            console.log('[ttyd] offline, waiting for network...');
+            overlayAddon.showOverlay('Waiting for network...');
+            const onOnline = () => {
+                window.removeEventListener('online', onOnline);
+                console.log('[ttyd] network restored, reconnecting...');
+                this.reconnectAttempt = 0; // Reset counter
+                this.attemptReconnect();
+            };
+            window.addEventListener('online', onOnline);
             return;
         }
 
@@ -351,16 +391,47 @@ export class Xterm {
             return;
         }
 
-        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt - 1), 30000);
+        // First attempt: try immediately. Subsequent attempts: exponential backoff
+        const delay = this.reconnectAttempt === 1 ? 0 : Math.min(1000 * Math.pow(2, this.reconnectAttempt - 2), 30000);
         const delaySecs = Math.round(delay / 1000);
 
-        console.log(`[ttyd] reconnect attempt ${this.reconnectAttempt} in ${delaySecs}s`);
-        overlayAddon.showOverlay(`Reconnecting in ${delaySecs}s...`);
-
-        setTimeout(() => {
+        if (delay === 0) {
+            console.log('[ttyd] reconnecting...');
             overlayAddon.showOverlay('Reconnecting...');
-            this.doReconnect = true; // Reset for next attempt
-            refreshToken().then(connect);
+        } else {
+            console.log(`[ttyd] reconnect attempt ${this.reconnectAttempt} in ${delaySecs}s`);
+            overlayAddon.showOverlay(`Reconnecting in ${delaySecs}s...`);
+        }
+
+        setTimeout(async () => {
+            // Re-check visibility before actually trying
+            if (document.hidden) {
+                this.attemptReconnect(); // Will wait for visibility
+                return;
+            }
+            overlayAddon.showOverlay('Reconnecting...');
+            this.doReconnect = true;
+
+            // Try to refresh token - if it fails (network error), wait for online
+            const tokenOk = await refreshToken();
+            if (!tokenOk) {
+                console.log('[ttyd] network error, waiting for connectivity...');
+                this.reconnectAttempt--; // Don't count network failures
+                overlayAddon.showOverlay('Waiting for network...');
+                const onOnline = () => {
+                    window.removeEventListener('online', onOnline);
+                    console.log('[ttyd] online event, retrying...');
+                    this.attemptReconnect();
+                };
+                window.addEventListener('online', onOnline);
+                // Also retry after a delay in case online event doesn't fire
+                setTimeout(() => {
+                    window.removeEventListener('online', onOnline);
+                    this.attemptReconnect();
+                }, 10000);
+                return;
+            }
+            connect();
         }, delay);
     }
 

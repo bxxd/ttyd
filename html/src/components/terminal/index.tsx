@@ -83,7 +83,11 @@ export class Terminal extends Component<Props, State> {
                 {/* Mobile input - invisible textarea with stable position */}
                 {isMobile() && (
                     <textarea
-                        ref={c => { this.mobileInput = c as HTMLTextAreaElement; }}
+                        ref={c => {
+                            this.mobileInput = c as HTMLTextAreaElement;
+                            // Set spellcheck as string attribute for Gboard compatibility
+                            if (c) c.setAttribute('spellcheck', 'false');
+                        }}
                         class={`mobile-input-capture ${mobileInputVisible ? 'active' : ''}`}
                         onInput={this.handleMobileInput}
                         onKeyDown={this.handleMobileKeyDown}
@@ -92,7 +96,6 @@ export class Terminal extends Component<Props, State> {
                         autocomplete="off"
                         autocorrect="off"
                         autocapitalize="off"
-                        spellcheck="false"
                     />
                 )}
             </div>
