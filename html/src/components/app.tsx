@@ -30,6 +30,7 @@ const clientOptions = {
 const termOptions = {
     fontSize: 13,
     fontFamily: 'Consolas,Liberation Mono,Menlo,Courier,monospace',
+    cursorInactiveStyle: 'block', // Show cursor even when terminal not focused (for mobile input)
     theme: {
         foreground: '#d2d2d2',
         background: '#2b2b2b',

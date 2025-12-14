@@ -125,6 +125,10 @@ export class Xterm {
         return this.socket?.readyState === WebSocket.OPEN;
     }
 
+    public focus(): void {
+        this.terminal?.focus();
+    }
+
     @bind
     private register<T extends IDisposable>(d: T): T {
         this.disposables.push(d);

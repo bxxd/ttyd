@@ -131,16 +131,31 @@ export class Terminal extends Component<Props, State> {
         // Don't trigger if clicking on other inputs (file input, etc)
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT') return;
+
+        // If already visible and has content, user is actively typing - just refocus
+        if (this.state.mobileInputVisible && this.mobileInput?.value) {
+            this.mobileInput?.focus();
+            return;
+        }
+
         if (target === this.mobileInput) {
             // Already focused, just ensure state is synced
             this.setState({ mobileInputVisible: true });
             return;
         }
 
+        // Clear SYNCHRONOUSLY before RAF to avoid race with input events
+        this.clearMobileInput();
         this.setState({ mobileInputVisible: true });
         requestAnimationFrame(() => {
-            this.clearMobileInput();
             this.mobileInput?.focus();
+            // Send zero-width space to trigger cursor redraw, then delete it
+            setTimeout(() => {
+                this.xterm.sendData('\u200B');
+                setTimeout(() => {
+                    this.xterm.sendData('\x7f');
+                }, 10);
+            }, 50);
         });
     }
 
@@ -187,6 +202,11 @@ export class Terminal extends Component<Props, State> {
         } else if (e.ctrlKey && e.key === 'd') {
             e.preventDefault();
             this.xterm.sendData('\x04'); // EOF
+        } else if (e.key === 'Backspace' && this.mobileInput?.value === '') {
+            // Textarea empty but user wants to delete more - send backspace anyway
+            // This handles deleting content from previous focus sessions
+            e.preventDefault();
+            this.xterm.sendData('\x7f');
         }
     }
 
