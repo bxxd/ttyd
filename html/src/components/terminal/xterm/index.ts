@@ -101,13 +101,17 @@ export class Xterm {
     private reconnect = true;
     private doReconnect = true;
     private closeOnDisconnect = false;
+    private reconnectAttempt = 0;
 
     private writeFunc = (data: ArrayBuffer) => this.writeData(new Uint8Array(data));
 
     constructor(
         private options: XtermOptions,
         private sendCb: () => void
-    ) {}
+    ) {
+        // Expose for debugging: window.ttydSocket.close() to test reconnect
+        (window as any).ttydSocket = null;
+    }
 
     dispose() {
         for (const d of this.disposables) {
@@ -204,7 +208,24 @@ export class Xterm {
                 this.overlayAddon?.showOverlay('\u2702', 200);
             })
         );
-        register(addEventListener(window, 'resize', () => fitAddon.fit()));
+        let resizeDebounce: ReturnType<typeof setTimeout> | null = null;
+        register(addEventListener(window, 'resize', () => {
+            // Save scroll position before resize
+            const viewportY = terminal.buffer.active.viewportY;
+            const baseY = terminal.buffer.active.baseY;
+            const wasAtBottom = viewportY >= baseY;
+
+            fitAddon.fit();
+
+            // After Ink redraws, restore scroll position or stay at bottom
+            if (resizeDebounce) clearTimeout(resizeDebounce);
+            resizeDebounce = setTimeout(() => {
+                if (wasAtBottom) {
+                    terminal.scrollToBottom();
+                }
+                // If not at bottom, xterm preserves relative position automatically
+            }, 400); // Wait for Ink redraw
+        }));
         register(addEventListener(window, 'beforeunload', this.onWindowUnload));
     }
 
@@ -252,6 +273,7 @@ export class Xterm {
     @bind
     public connect() {
         this.socket = new WebSocket(this.options.wsUrl, ['tty']);
+        (window as any).ttydSocket = this.socket; // Debug: window.ttydSocket.close()
         const { socket, register } = this;
 
         socket.binaryType = 'arraybuffer';
@@ -264,20 +286,36 @@ export class Xterm {
     @bind
     private onSocketOpen() {
         console.log('[ttyd] websocket connection opened');
+        this.reconnectAttempt = 0; // Reset on successful connect
 
         const { textEncoder, terminal, overlayAddon } = this;
         const msg = JSON.stringify({ AuthToken: this.token, columns: terminal.cols, rows: terminal.rows });
         this.socket?.send(textEncoder.encode(msg));
 
-        if (this.opened) {
-            terminal.reset();
+        const isReconnect = this.opened;
+        if (isReconnect) {
+            // Don't call terminal.reset() - it breaks Ink/ANSI apps like Claude Code
+            // that depend on cursor position state for in-place updates
             terminal.options.disableStdin = false;
             overlayAddon.showOverlay('Reconnected', 300);
-            // Trigger resize to make ttyd redraw screen content
-            setTimeout(() => this.fitAddon.fit(), 100);
-        } else {
-            this.opened = true;
         }
+        this.opened = true;
+
+        // Resize after connect/reconnect
+        setTimeout(() => {
+            this.fitAddon.fit();
+
+            // On reconnect, force send resize to trigger SIGWINCH in PTY
+            // This makes Ink/Claude Code redraw properly
+            if (isReconnect && this.socket?.readyState === WebSocket.OPEN) {
+                const { cols, rows } = terminal;
+                const msg = JSON.stringify({ columns: cols, rows: rows });
+                this.socket.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
+            }
+
+            // Scroll to bottom after re-render completes
+            setTimeout(() => terminal.scrollToBottom(), 300);
+        }, 100);
 
         this.doReconnect = this.reconnect;
         this.initListeners();
@@ -288,28 +326,42 @@ export class Xterm {
     private onSocketClose(event: CloseEvent) {
         console.log(`[ttyd] websocket connection closed with code: ${event.code}`);
 
-        const { refreshToken, connect, doReconnect, overlayAddon } = this;
+        const { refreshToken, connect, overlayAddon } = this;
         overlayAddon.showOverlay('Connection Closed');
         this.dispose();
 
-        // 1000: CLOSE_NORMAL
-        if (event.code !== 1000 && doReconnect) {
-            overlayAddon.showOverlay('Reconnecting...');
-            refreshToken().then(connect);
-        } else if (this.closeOnDisconnect) {
+        if (this.closeOnDisconnect) {
             window.close();
-        } else {
-            const { terminal } = this;
-            const keyDispose = terminal.onKey(e => {
-                const event = e.domEvent;
-                if (event.key === 'Enter') {
-                    keyDispose.dispose();
-                    overlayAddon.showOverlay('Reconnecting...');
-                    refreshToken().then(connect);
-                }
-            });
-            overlayAddon.showOverlay('Press ⏎ to Reconnect');
+            return;
         }
+
+        // Auto-reconnect with exponential backoff
+        this.reconnectAttempt++;
+
+        // After 3 failed attempts, ask parent to reconnect terminal
+        if (this.reconnectAttempt > 3) {
+            console.log('[ttyd] too many failed reconnects, requesting panel reconnect');
+            overlayAddon.showOverlay('Reconnecting...');
+            // Ask parent to recreate terminal session
+            if (window.parent !== window) {
+                window.parent.postMessage({ type: 'ttyd_reconnect' }, '*');
+            } else {
+                window.location.reload();
+            }
+            return;
+        }
+
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt - 1), 30000);
+        const delaySecs = Math.round(delay / 1000);
+
+        console.log(`[ttyd] reconnect attempt ${this.reconnectAttempt} in ${delaySecs}s`);
+        overlayAddon.showOverlay(`Reconnecting in ${delaySecs}s...`);
+
+        setTimeout(() => {
+            overlayAddon.showOverlay('Reconnecting...');
+            this.doReconnect = true; // Reset for next attempt
+            refreshToken().then(connect);
+        }, delay);
     }
 
     @bind
