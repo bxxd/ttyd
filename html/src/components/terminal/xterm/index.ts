@@ -598,7 +598,7 @@ export class Xterm {
                     } else {
                         terminal.options[key] = value;
                     }
-                    if (key.indexOf('font') === 0) fitAddon.fit();
+                    if (key.indexOf('font') === 0 || key === 'lineHeight') fitAddon.fit();
                     break;
             }
         }
