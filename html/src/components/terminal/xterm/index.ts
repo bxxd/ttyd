@@ -291,38 +291,67 @@ export class Xterm {
     }
 
     @bind
-    private onSocketOpen() {
+    private async onSocketOpen() {
         console.log('[ttyd] websocket connection opened');
         this.reconnectAttempt = 0; // Reset on successful connect
 
-        const { textEncoder, terminal, overlayAddon } = this;
-        const msg = JSON.stringify({ AuthToken: this.token, columns: terminal.cols, rows: terminal.rows });
-        this.socket?.send(textEncoder.encode(msg));
-
         const isReconnect = this.opened;
+        const { terminal, overlayAddon, fitAddon } = this;
+
+        // Wait for the terminal's parent container to have stable dimensions
+        // before measuring. Without this, fit() called during a layout transition
+        // (e.g., side-tray collapse, panel mount, mobile viewport settling)
+        // captures a transient width — the auth msg reports wrong cols/rows,
+        // ttyd spawns the PTY at the wrong size, and Claude Code's banner gets
+        // squished/garbled when the layout finally lands.
+        const fontsReady = document.fonts?.ready ?? Promise.resolve();
+        await fontsReady;
+
+        const proposedCols = (): number => {
+            try {
+                return (fitAddon as any).proposeDimensions?.()?.cols ?? 0;
+            } catch {
+                return 0;
+            }
+        };
+        const start = performance.now();
+        let lastCols = -1;
+        let stableTicks = 0;
+        while (performance.now() - start < 500) {
+            await new Promise<void>(r => requestAnimationFrame(() => r()));
+            const cols = proposedCols();
+            if (cols > 0 && cols === lastCols) {
+                stableTicks++;
+                if (stableTicks >= 2) break;
+            } else {
+                stableTicks = 0;
+                lastCols = cols;
+            }
+        }
+
+        fitAddon.fit();
+        const msg = JSON.stringify({
+            AuthToken: this.token,
+            columns: terminal.cols,
+            rows: terminal.rows,
+        });
+        this.socket?.send(this.textEncoder.encode(msg));
+
         if (isReconnect) {
             // Don't call terminal.reset() - it breaks Ink/ANSI apps like Claude Code
             // that depend on cursor position state for in-place updates
             terminal.options.disableStdin = false;
             overlayAddon.showOverlay('Reconnected', 300);
+
+            // Force resize to trigger SIGWINCH and make Ink redraw
+            if (this.socket?.readyState === WebSocket.OPEN) {
+                const { cols, rows } = terminal;
+                const resizeMsg = JSON.stringify({ columns: cols, rows: rows });
+                this.socket.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + resizeMsg));
+            }
         }
         this.opened = true;
-
-        // Resize after connect/reconnect
-        setTimeout(() => {
-            this.fitAddon.fit();
-
-            // On reconnect, force send resize to trigger SIGWINCH in PTY
-            // This makes Ink/Claude Code redraw properly
-            if (isReconnect && this.socket?.readyState === WebSocket.OPEN) {
-                const { cols, rows } = terminal;
-                const msg = JSON.stringify({ columns: cols, rows: rows });
-                this.socket.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
-            }
-
-            // Scroll to bottom after re-render completes
-            setTimeout(() => terminal.scrollToBottom(), 300);
-        }, 100);
+        setTimeout(() => terminal.scrollToBottom(), 300);
 
         this.doReconnect = this.reconnect;
         this.initListeners();
