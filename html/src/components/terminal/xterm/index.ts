@@ -67,6 +67,10 @@ export interface XtermOptions {
     termOptions: ITerminalOptions;
 }
 
+// How often to re-check whether the page can reconnect while parked waiting for
+// it. Events and animation frames cover the normal cases; this is the floor.
+const RESUME_POLL_INTERVAL = 2000;
+
 function toDisposable(f: () => void): IDisposable {
     return { dispose: f };
 }
@@ -102,6 +106,7 @@ export class Xterm {
     private doReconnect = true;
     private closeOnDisconnect = false;
     private reconnectAttempt = 0;
+    private cancelResumeWait?: () => void;
 
     private writeFunc = (data: ArrayBuffer) => this.writeData(new Uint8Array(data));
 
@@ -375,36 +380,61 @@ export class Xterm {
         this.attemptReconnect();
     }
 
+    /**
+     * Park until the page is visible and online again, then run `onResume`.
+     *
+     * Waiting on `visibilitychange`/`online` alone strands the terminal: a
+     * mobile browser that suspended the tab delivers the socket's close event
+     * on the way back in, and by then its own resume events have already
+     * fired, so the listener we register here never runs. Wake on the first
+     * rendered frame as well (animation frames are paused while hidden, and
+     * resume the moment the page is painted again), and poll underneath both
+     * for the case where nothing is being rendered at all - a terminal in a
+     * panel the app has hidden still needs to come back.
+     */
+    private waitForResume(onResume: () => void) {
+        if (this.cancelResumeWait) return; // a wait is already in flight
+
+        let frame = 0;
+        const check = () => {
+            if (document.hidden || !navigator.onLine) return;
+            this.cancelResumeWait?.();
+            onResume();
+        };
+        const tick = () => {
+            frame = requestAnimationFrame(tick);
+            check();
+        };
+        const listeners = [
+            addEventListener(document, 'visibilitychange', check),
+            addEventListener(window, 'online', check),
+        ];
+        const poll = window.setInterval(check, RESUME_POLL_INTERVAL);
+
+        this.cancelResumeWait = () => {
+            this.cancelResumeWait = undefined;
+            for (const l of listeners) l.dispose();
+            window.clearInterval(poll);
+            cancelAnimationFrame(frame);
+        };
+
+        tick();
+    }
+
     private attemptReconnect() {
         const { refreshToken, connect, overlayAddon } = this;
 
-        // If page is hidden (backgrounded/phone asleep), wait until visible
-        if (document.hidden) {
-            console.log('[ttyd] page hidden, waiting for visibility...');
-            overlayAddon.showOverlay('Waiting...');
-            const onVisible = () => {
-                if (!document.hidden) {
-                    document.removeEventListener('visibilitychange', onVisible);
-                    console.log('[ttyd] page visible, checking connection...');
-                    this.reconnectAttempt = 0; // Reset counter - fresh start
-                    this.attemptReconnect();
-                }
-            };
-            document.addEventListener('visibilitychange', onVisible);
-            return;
-        }
-
-        // If offline, wait for network
-        if (!navigator.onLine) {
-            console.log('[ttyd] offline, waiting for network...');
-            overlayAddon.showOverlay('Waiting for network...');
-            const onOnline = () => {
-                window.removeEventListener('online', onOnline);
-                console.log('[ttyd] network restored, reconnecting...');
-                this.reconnectAttempt = 0; // Reset counter
+        // Hidden (backgrounded/phone asleep) or offline - nothing to try until
+        // the browser is back. Then start over with a fresh attempt count.
+        if (document.hidden || !navigator.onLine) {
+            const reason = document.hidden ? 'page hidden' : 'offline';
+            console.log(`[ttyd] ${reason}, waiting to resume...`);
+            overlayAddon.showOverlay(document.hidden ? 'Waiting...' : 'Waiting for network...');
+            this.waitForResume(() => {
+                console.log('[ttyd] page resumed, checking connection...');
+                this.reconnectAttempt = 0; // Reset counter - fresh start
                 this.attemptReconnect();
-            };
-            window.addEventListener('online', onOnline);
+            });
             return;
         }
 
